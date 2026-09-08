@@ -13,10 +13,10 @@ from services.ai_service import AnalysisUnavailable, analyze_review
 from services.analytics_service import CATEGORY_LABELS, brand_health_score
 from services.import_service import ImportServiceError, collect_2gis, collect_facebook, collect_instagram, save_collected
 from services.pipeline_service import analyze_pending
-from services.supabase_service import DataServiceError, fetch_reviews, normalize_reviews
+from services.supabase_service import DataServiceError, fetch_reviews, insert_reviews, normalize_reviews
 from utils.config import settings
 
-st.set_page_config(page_title="Sentiment Analyzer · GRATA International", page_icon="◆", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Sentiment Analyzer · GRATA International", page_icon="◆", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -24,17 +24,19 @@ st.markdown("""
 :root{--navy:#070E36;--blue:#4E81EE;--blue-light:#4E81EE;--blue-soft:#EAF1FF;--ink:#070E36;--muted:#5B6478;--line:#E0E0E0;--critical:#D5473F;--warning:#D69A2D;--stable:#2E9E63}
 html,body,[class*="css"],.stApp{font-family:'Plus Jakarta Sans',sans-serif}.stApp{background:#FFF;color:var(--ink)}[data-testid="stHeader"]{background:rgba(255,255,255,.94);border-bottom:1px solid #F0F1F4}
 [data-testid="stSidebar"]{background:var(--navy);border-right:0}[data-testid="stSidebar"] *{color:#EDF1FF}[data-testid="stSidebar"] [data-baseweb="select"]>div,[data-testid="stSidebar"] input,[data-testid="stSidebar"] textarea{background:#111A4A;border:1px solid rgba(255,255,255,.16);border-radius:5px}[data-testid="stSidebar"] .stButton button{border-radius:999px!important;background:transparent!important;color:#FFF!important;border:1.5px solid rgba(255,255,255,.8)!important;box-shadow:none!important}[data-testid="stSidebar"] .stButton button:hover{background:#142052!important;border-color:#4E81EE!important;color:#FFF!important}
+[data-testid="stSidebar"] [role="radiogroup"]{gap:.25rem}[data-testid="stSidebar"] [role="radiogroup"] label{padding:.65rem .75rem;border-radius:7px;transition:.15s;background:transparent}[data-testid="stSidebar"] [role="radiogroup"] label>div:first-child{display:none}[data-testid="stSidebar"] [role="radiogroup"] label:hover{background:#111A4A}[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){background:#142052;color:#FFF}[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p{color:#7EA4F5!important;font-weight:700}
 .block-container{max-width:1180px;padding-top:2.2rem;padding-bottom:4rem}h1,h2,h3,p,label,.stMarkdown{color:var(--ink)}h1{letter-spacing:-.035em;font-size:2.45rem!important;font-weight:800!important;margin-bottom:.15rem!important;color:var(--navy)!important}
 .brand{color:#FFF;font-size:1.18rem;font-weight:800;letter-spacing:-.02em;display:flex;align-items:center}.brand-mark{width:34px;height:34px;border:2px solid #FFF;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#FFF;margin-right:.65rem;font-size:0}.brand-mark:after{content:'G';font-size:14px;font-weight:800}.brand-sub{color:#929AB8;font-size:.62rem;letter-spacing:.18em;margin:.15rem 0 1.6rem;padding-left:2.95rem}.company-line{color:var(--muted);font-size:.88rem;margin-bottom:1.35rem}.live-dot{width:7px;height:7px;display:inline-block;border-radius:50%;background:var(--stable);margin-right:7px}.fallback-dot{background:var(--warning)}
 .metric-card{background:#FFF;border:1px solid var(--line);border-radius:9px;padding:1.25rem 1.4rem;min-height:138px;text-align:left;box-shadow:0 1px 2px rgba(7,14,54,.04);transition:border-color .18s ease}.metric-card:hover{border-color:#B9C9EA}.metric-card.alert{border-left:3px solid var(--critical)}.metric-card.good{border-left:3px solid var(--stable)}.metric-label{color:var(--muted);font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}.metric-value{color:var(--navy);font-size:2.15rem;line-height:1.2;font-weight:800;margin:.5rem 0 .25rem}.metric-note{color:var(--muted);font-size:.78rem}.section-label{color:var(--blue);font-size:.7rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;margin:1.9rem 0 .65rem}
 .overview-note{background:#F2FAF6;border:1px solid #CBE8D8;border-left:3px solid var(--stable);border-radius:8px;padding:.8rem 1rem;color:#226F49;font-size:.87rem;margin:.9rem 0 1.1rem}.overview-note.attention{background:#FFF9ED;border-color:#F0D9A6;border-left-color:var(--warning);color:#8A641B}.signal-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;margin:.85rem 0 1.1rem}.signal-item{background:#FFF;border:1px solid var(--line);border-radius:8px;padding:.9rem 1rem;box-shadow:0 1px 2px rgba(7,14,54,.04)}.signal-number{color:var(--navy);font-size:1.35rem;font-weight:800}.signal-label{color:var(--muted);font-size:.75rem;margin-top:.15rem}.empty-panel{background:#F2FAF6;border:1px solid #CBE8D8;border-radius:8px;padding:1.15rem;color:#226F49;min-height:110px;display:flex;align-items:center}.registry-help{color:var(--muted);font-size:.82rem;margin-bottom:.75rem}
 .chart-heading{color:var(--navy);font-size:.96rem;font-weight:700;margin:.2rem 0 .65rem}.chart-sub{color:var(--muted);font-size:.78rem;margin-top:-.5rem;margin-bottom:.35rem}
+.page-kicker{color:var(--blue);font-size:.69rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase;margin-bottom:.35rem}.page-subtitle{color:var(--muted);font-size:.88rem;margin:.15rem 0 1.35rem}.source-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin:1rem 0}.source-card{background:#FFF;border:1px solid var(--line);border-radius:9px;padding:1.05rem;min-height:135px}.source-icon{width:34px;height:34px;border-radius:8px;background:#EAF1FF;color:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:800;margin-bottom:.8rem}.source-name{color:var(--navy);font-weight:750;font-size:.91rem}.source-status{color:var(--stable);font-size:.75rem;margin:.25rem 0 .65rem}.source-status.off{color:var(--muted)}.source-count{color:var(--muted);font-size:.78rem}.connection-panel{background:var(--navy);border-radius:9px;padding:1.2rem 1.3rem;color:#FFF}.connection-panel strong{color:#FFF}.connection-panel p{color:#AEB6D2;font-size:.8rem;margin:.25rem 0}.insight-strip{background:#F5F8FF;border:1px solid #D9E4FA;border-left:3px solid var(--blue);border-radius:8px;padding:1rem 1.1rem;margin:1rem 0;color:#27314A}.insight-strip strong{color:var(--navy)}
 .summary-card{background:#FFF;border:1px solid var(--line);border-radius:9px;padding:1.4rem 1.5rem;margin:1.15rem 0 1.5rem;box-shadow:0 1px 2px rgba(7,14,54,.04)}.summary-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1rem}.summary-title{color:var(--navy);font-size:1.12rem;font-weight:800}.summary-sub{color:var(--muted);font-size:.76rem;margin-top:.18rem}.summary-status{padding:.34rem .68rem;border-radius:999px;font-size:.67rem;font-weight:800;letter-spacing:.05em;white-space:nowrap}.summary-status.critical{color:var(--critical);background:#FBEAE9;border:1px solid #F3C9C6}.summary-status.medium{color:#9B6C13;background:#FBF1DE;border:1px solid #EED59F}.summary-status.stable{color:var(--stable);background:#E7F5EC;border:1px solid #C6E7D2}.audit-zone{background:#FAFBFD;border:1px solid var(--line);border-radius:8px;padding:1rem 1.05rem;margin-top:.8rem}.audit-zone-title{color:var(--blue);font-size:.69rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.55rem}.audit-text,.audit-list{color:#394259;font-size:.87rem;line-height:1.7}.audit-text strong,.audit-list strong{color:var(--navy)}.audit-list{margin:.15rem 0 0;padding-left:1.08rem}.priority-zone{border-left:3px solid var(--blue);background:#F5F8FF}
 .task-card{background:#FFF;border:1px solid var(--line);border-left:4px solid var(--stable);border-radius:9px;margin:.8rem 0;padding:1.2rem 1.35rem;box-shadow:0 1px 2px rgba(7,14,54,.04)}.task-card.critical{border-left-color:var(--critical);background:#FFFBFB}.task-card.medium{border-left-color:var(--warning)}.task-card.stable{border-left-color:var(--stable)}.task-top{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.task-title{color:var(--navy);font-weight:750;font-size:1.03rem}.task-meta{color:var(--muted);font-size:.78rem;margin-top:.22rem}.risk-badge{border-radius:999px;padding:.3rem .62rem;font-size:.66rem;font-weight:800;letter-spacing:.05em;white-space:nowrap}.critical .risk-badge{color:var(--critical);background:#FBEAE9}.medium .risk-badge{color:#9B6C13;background:#FBF1DE}.stable .risk-badge{color:var(--stable);background:#E7F5EC}.problem{color:#202942;font-size:.92rem;font-weight:650;margin:1rem 0 .55rem}.quote{color:var(--muted);background:#F7F9FC;border-left:2px solid #C7CDDA;padding:.7rem .9rem;font-style:italic;border-radius:0 5px 5px 0}.resolution{color:#27314A;background:#F5F8FF;border:1px solid #D9E4FA;border-left:3px solid var(--blue);padding:.9rem 1rem;margin-top:.9rem;border-radius:0 6px 6px 0}.resolution-title{color:var(--blue);font-size:.72rem;font-weight:800;letter-spacing:.06em;margin-bottom:.32rem}
 [data-testid="stTabs"] [data-baseweb="tab-list"]{gap:1.3rem;border-bottom:1px solid var(--line)}[data-testid="stTabs"] button{color:var(--muted);font-weight:600;padding-left:.15rem;padding-right:.15rem}[data-testid="stTabs"] button[aria-selected="true"]{color:var(--navy)}[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--blue)}[data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:8px;overflow:hidden}div[data-testid="stPlotlyChart"]{background:#FFF;border:1px solid var(--line);border-radius:9px;padding:.35rem;box-shadow:0 1px 2px rgba(7,14,54,.04)}
 [data-testid="stAppViewContainer"] .stButton button{min-height:2.6rem;border-radius:999px!important;font-weight:700!important;background:#FFF!important;color:var(--navy)!important;border:1.5px solid var(--navy)!important;box-shadow:none!important}[data-testid="stAppViewContainer"] .stButton button:hover{border-color:var(--blue)!important;color:var(--blue)!important;background:#FFF!important}[data-testid="stAppViewContainer"] .stButton button[kind="primary"]{background:#FFF!important;color:var(--navy)!important;border-color:var(--navy)!important}[data-testid="stAppViewContainer"] .stButton button[kind="primary"]:hover{background:var(--blue)!important;color:#FFF!important;border-color:var(--blue)!important}[data-testid="stAppViewContainer"] input,[data-testid="stAppViewContainer"] [data-baseweb="select"]>div{border-radius:5px!important;border-color:var(--line)!important;background:#FFF!important}
 @media(max-width:800px){.block-container{padding:1.2rem .8rem 3rem}h1{font-size:2rem!important}.metric-card{min-height:112px;margin-bottom:.6rem}.task-top{display:block}.risk-badge{display:inline-block;margin-top:.45rem}[data-testid="stTabs"] [data-baseweb="tab-list"]{gap:.35rem;overflow-x:auto}[data-testid="stTabs"] button{font-size:.79rem;white-space:nowrap}}
-@media(max-width:560px){.signal-summary{grid-template-columns:1fr}}
+@media(max-width:800px){.source-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.signal-summary,.source-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -187,9 +189,19 @@ def _refresh_sources() -> None:
                 st.caption(error)
 
 
-def _sidebar() -> None:
+def _sidebar() -> str:
     with st.sidebar:
         st.markdown('<div class="brand"><span class="brand-mark">◆</span>Sentiment Analyzer</div><div class="brand-sub">GRATA INTERNATIONAL</div>', unsafe_allow_html=True)
+        navigation = {
+            "▦  Обзор": "dashboard",
+            "◉  Отзывы": "reviews",
+            "⌁  Аналитика": "analytics",
+            "✦  AI-выводы": "insights",
+            "▤  Источники": "sources",
+            "⚙  Настройки": "settings",
+        }
+        selected_label = st.radio("Навигация", list(navigation), label_visibility="collapsed")
+        st.divider()
         if st.button("🔄 Проверить новые отзывы", disabled=not(settings.supabase_configured and settings.apify_token), width="stretch", type="primary"):
             _refresh_sources()
         st.caption("НАСТРОЙКИ")
@@ -226,6 +238,7 @@ def _sidebar() -> None:
                     with st.spinner("Анализируем новые записи…"): result = analyze_pending(100)
                     st.cache_data.clear(); st.success(f"Готово: {result['done']}; ошибок: {result['failed']}")
                 except DataServiceError as exc: st.error(str(exc))
+    return navigation[selected_label]
 
 
 def _filter_period(data: pd.DataFrame) -> pd.DataFrame:
@@ -392,22 +405,62 @@ def _task(row: pd.Series, fallback: bool) -> None:
     st.markdown(f'<div class="task-card {css}"><div class="task-top"><div><div class="task-title">{category}</div><div class="task-meta">{_safe(row.get("source"))} · 🕒 {_relative_time(row.get("published_at"))}</div></div><span class="risk-badge">{badge}</span></div><div class="problem">{_safe(row.get("summary"))}</div><div class="quote">«{_safe(row.get("review_text"))}»</div><div class="resolution"><div class="resolution-title">🎯 РЕКОМЕНДАЦИЯ</div>{_safe(row.get("recommendation"))}</div></div>', unsafe_allow_html=True)
 
 
-_sidebar()
+def _platform_chart(data: pd.DataFrame) -> go.Figure:
+    analyzed = data[data["analysis_status"].eq("done")]
+    if analyzed.empty:
+        return go.Figure()
+    order = ["positive", "neutral", "negative"]
+    labels = {"positive": "Позитив", "neutral": "Нейтрально", "negative": "Негатив"}
+    colors = {"positive": "#2E9E63", "neutral": "#D69A2D", "negative": "#D5473F"}
+    matrix = pd.crosstab(analyzed["source"], analyzed["sentiment"], normalize="index").mul(100)
+    fig = go.Figure()
+    for sentiment in order:
+        values = matrix[sentiment] if sentiment in matrix else pd.Series(0, index=matrix.index)
+        fig.add_bar(name=labels[sentiment], x=matrix.index, y=values, marker_color=colors[sentiment], hovertemplate="%{x}: %{y:.0f}%<extra></extra>")
+    fig.update_layout(barmode="stack", height=340, margin=dict(l=20,r=20,t=25,b=25), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#5B6478"), legend=dict(orientation="h", y=-.2, x=.5, xanchor="center"))
+    fig.update_yaxes(range=[0,100], ticksuffix="%", gridcolor="#EEF0F4", title=None)
+    fig.update_xaxes(title=None)
+    return fig
+
+
+def _page_header(title: str, subtitle: str, kicker: str = "SENTIMENT ANALYZER") -> None:
+    st.markdown(f'<div class="page-kicker">{html.escape(kicker)}</div>', unsafe_allow_html=True)
+    st.title(title)
+    st.markdown(f'<div class="page-subtitle">{html.escape(subtitle)}</div>', unsafe_allow_html=True)
+
+
+def _registry(data: pd.DataFrame) -> None:
+    if data.empty:
+        st.info("Документы ещё не загружены.")
+        return
+    st.markdown('<div class="registry-help">Все данные сохранены: полноценные отзывы, комментарии и короткие реакции.</div>', unsafe_allow_html=True)
+    filter_left, filter_mid, filter_right = st.columns([1.4, 1, 1])
+    with filter_left: query = st.text_input("Поиск", placeholder="Автор, ключевое слово или текст")
+    with filter_mid: sources = st.multiselect("Площадка", sorted(data["source"].dropna().astype(str).unique()))
+    with filter_right: tones = st.multiselect("Настроение", ["Позитив", "Нейтрально", "Негатив", "Не обработано"])
+    registry=data.sort_values("published_at",ascending=False).copy(); registry["Дата"]=registry.published_at.dt.strftime("%d.%m.%Y %H:%M"); registry["Источник"]=registry.source; registry["Автор"]=registry.author; registry["Оценка"]=registry.rating.map(lambda x:f"{int(x)}/5" if int(x)>0 else "Без оценки"); registry["Настроение"]=registry.sentiment.map({"positive":"Позитив","neutral":"Нейтрально","negative":"Негатив"}).fillna("Не обработано"); registry["Риск"]=registry.apply(lambda row: str(int(row["risk_score"])) if row["sentiment"] == "negative" else "Нет риска", axis=1); registry["Текст"]=registry.review_text
+    if sources: registry = registry[registry["Источник"].isin(sources)]
+    if tones: registry = registry[registry["Настроение"].isin(tones)]
+    if query.strip():
+        needle=query.strip().lower(); registry=registry[registry["Автор"].fillna("").str.lower().str.contains(needle,regex=False)|registry["Текст"].fillna("").str.lower().str.contains(needle,regex=False)]
+    st.caption(f"Показано: {len(registry)} из {len(data)}")
+    st.dataframe(registry[["Дата","Источник","Автор","Оценка","Настроение","Риск","Текст"]],hide_index=True,width="stretch",height=620)
+
+
+view = _sidebar()
 raw_data, fallback_mode, data_note = load_data(); raw_data = _filter_period(raw_data)
 data = _meaningful_reviews(raw_data)
-st.title("Анализ отзывов")
-st.caption("Отзывы и комментарии из 2ГИС, Instagram и Facebook")
-head_left, head_right = st.columns([1.8, 1], vertical_alignment="center")
-with head_left:
-    checked_at = st.session_state.get("last_checked_at")
-    latest = raw_data["created_at"].max() if not raw_data.empty else pd.NaT
-    freshness = f"Последняя проверка: {checked_at}" if checked_at else (f"Последняя запись: {latest.tz_convert('Asia/Almaty').strftime('%d.%m.%Y, %H:%M')}" if pd.notna(latest) else "Данных пока нет")
-    st.markdown(f'<div class="company-line"><span class="live-dot {"fallback-dot" if fallback_mode else ""}"></span>GRATA International · {html.escape(freshness)}</div>', unsafe_allow_html=True)
-with head_right:
-    if st.button("🔄 Проверить новые отзывы", disabled=not(settings.supabase_configured and settings.apify_token), width="stretch", type="primary", help="Проверить 2ГИС, Instagram и Facebook"):
-        _refresh_sources()
-tab1,tab2,tab3=st.tabs(["📊  Сводка","🧠  Риски и выводы","📥  Все отзывы"])
-with tab1:
+checked_at = st.session_state.get("last_checked_at")
+latest = raw_data["created_at"].max() if not raw_data.empty else pd.NaT
+freshness = f"Последняя проверка: {checked_at}" if checked_at else (f"Последняя запись: {latest.tz_convert('Asia/Almaty').strftime('%d.%m.%Y, %H:%M')}" if pd.notna(latest) else "Данных пока нет")
+
+if view == "dashboard":
+    _page_header("Обзор", "Что клиенты говорят о GRATA International прямо сейчас")
+    head_left, head_right = st.columns([1.8, 1], vertical_alignment="center")
+    with head_left: st.markdown(f'<div class="company-line"><span class="live-dot {"fallback-dot" if fallback_mode else ""}"></span>{html.escape(freshness)}</div>', unsafe_allow_html=True)
+    with head_right:
+        if st.button("Проверить новые отзывы", disabled=not(settings.supabase_configured and settings.apify_token), width="stretch", type="primary"):
+            _refresh_sources()
     _metrics(data, len(raw_data))
     if data.empty:
         st.info("Содержательных отзывов за выбранный период нет. Короткие реакции сохранены в разделе «Все отзывы».")
@@ -415,9 +468,9 @@ with tab1:
         serious = int((((data["severity"] == "critical") | (data["risk_score"] >= 85)) & data["analysis_status"].eq("done")).sum())
         attention = int(((data["sentiment"] == "negative") & data["analysis_status"].eq("done")).sum())
         if serious:
-            st.markdown(f'<div class="overview-note attention"><strong>Требуется внимание:</strong> обнаружено серьёзных сигналов — {serious}. Они показаны первыми в разделе «Риски и выводы».</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="overview-note attention"><strong>Требуется внимание:</strong> обнаружено серьёзных сигналов — {serious}. Они показаны первыми в разделе «AI-выводы».</div>', unsafe_allow_html=True)
         elif attention:
-            st.markdown(f'<div class="overview-note attention"><strong>Критических угроз нет.</strong> При этом {attention} отзывов требуют проверки и показаны в разделе «Риски и выводы».</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="overview-note attention"><strong>Критических угроз нет.</strong> При этом {attention} отзывов требуют проверки и показаны в разделе «AI-выводы».</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="overview-note"><strong>Критических изменений не обнаружено.</strong> Репутационная ситуация стабильна по содержательным отзывам выбранного периода.</div>', unsafe_allow_html=True)
         st.markdown('<div class="section-label">Картина репутации</div>', unsafe_allow_html=True)
@@ -432,10 +485,28 @@ with tab1:
                 st.markdown('<div class="empty-panel">✓ Системных причин недовольства за выбранный период не обнаружено.</div>', unsafe_allow_html=True)
             else:
                 st.plotly_chart(_issues_chart(data), width="stretch", config={"displayModeBar": False})
-        _general_recommendations(data)
-        st.markdown('<div class="section-label">Как меняются отзывы со временем</div>', unsafe_allow_html=True)
-        st.plotly_chart(_trend(data), width="stretch", config={"displayModeBar": False})
-with tab2:
+        negative = data[(data["analysis_status"] == "done") & (data["sentiment"] == "negative")]
+        insight = "Негативных сигналов не обнаружено — сохраняйте текущий стандарт коммуникации."
+        if not negative.empty:
+            top_issue = CATEGORY_LABELS.get(str(negative["category"].value_counts().index[0]), "Другое")
+            insight = f"Главный фокус: {top_issue.lower()}. Откройте AI-выводы для подробной управленческой резолюции."
+        st.markdown(f'<div class="insight-strip"><strong>Ключевой вывод.</strong> {html.escape(insight)}</div>', unsafe_allow_html=True)
+
+elif view == "reviews":
+    _page_header("Все отзывы", "Поиск и проверка обратной связи из всех подключённых источников")
+    _registry(raw_data)
+
+elif view == "analytics":
+    _page_header("Аналитика", "Динамика настроений, проблемные темы и сравнение площадок")
+    trend_tab, topics_tab, platforms_tab = st.tabs(["Динамика", "Темы", "Площадки"])
+    with trend_tab: st.plotly_chart(_trend(data), width="stretch", config={"displayModeBar":False})
+    with topics_tab:
+        if data[data["sentiment"].eq("negative")].empty: st.info("Негативных тем за выбранный период нет.")
+        else: st.plotly_chart(_issues_chart(data), width="stretch", config={"displayModeBar":False})
+    with platforms_tab: st.plotly_chart(_platform_chart(data), width="stretch", config={"displayModeBar":False})
+
+elif view == "insights":
+    _page_header("AI-выводы", "Риски, сильные стороны и рекомендации для руководства")
     if fallback_mode: st.warning("Показаны резервные демонстрационные записи. Подключите Supabase для реальных решений.")
     analyzed=data[data["analysis_status"].eq("done")].copy()
     lightweight_count = max(0, len(raw_data) - len(data))
@@ -453,18 +524,39 @@ with tab2:
         if not stable.empty:
             with st.expander(f"Показать стабильные содержательные отзывы ({len(stable)})"):
                 for _, row in stable.iterrows(): _task(row, fallback_mode)
-with tab3:
-    if raw_data.empty: st.info("Документы ещё не загружены.")
-    else:
-        st.markdown('<div class="registry-help">Здесь хранятся все данные без удаления: полноценные отзывы, комментарии и короткие реакции.</div>', unsafe_allow_html=True)
-        filter_left, filter_mid, filter_right = st.columns([1.4, 1, 1])
-        with filter_left: query = st.text_input("Поиск", placeholder="Автор или текст отзыва")
-        with filter_mid: sources = st.multiselect("Площадка", sorted(raw_data["source"].dropna().astype(str).unique()))
-        with filter_right: tones = st.multiselect("Настроение", ["Позитив", "Нейтрально", "Негатив", "Не обработано"])
-        registry=raw_data.sort_values("published_at",ascending=False).copy(); registry["Дата"]=registry.published_at.dt.strftime("%d.%m.%Y %H:%M"); registry["Источник"]=registry.source; registry["Автор"]=registry.author; registry["Оценка"]=registry.rating.map(lambda x:f"{int(x)}/5" if int(x)>0 else "Без оценки"); registry["Тональность"]=registry.sentiment.map({"positive":"Позитив","neutral":"Нейтрально","negative":"Негатив"}).fillna("Не обработано"); registry["Риск"]=registry.apply(lambda row: str(int(row["risk_score"])) if row["sentiment"] == "negative" else "Нет риска", axis=1); registry["Текст"]=registry.review_text
-        if sources: registry = registry[registry["Источник"].isin(sources)]
-        if tones: registry = registry[registry["Тональность"].isin(tones)]
-        if query.strip():
-            needle = query.strip().lower(); registry = registry[registry["Автор"].fillna("").str.lower().str.contains(needle, regex=False) | registry["Текст"].fillna("").str.lower().str.contains(needle, regex=False)]
-        st.caption(f"Показано записей: {len(registry)} из {len(raw_data)}")
-        st.dataframe(registry[["Дата","Источник","Автор","Оценка","Тональность","Риск","Текст"]],hide_index=True,width="stretch",height=590)
+        _general_recommendations(data)
+
+elif view == "sources":
+    _page_header("Источники", "Подключённые площадки и загрузка новых данных")
+    counts = raw_data["source"].value_counts().to_dict() if not raw_data.empty else {}
+    cards=[]
+    for icon,name,data_key,ready in [("2","2ГИС","2GIS",bool(settings.apify_token)),("◎","Instagram","Instagram",bool(settings.apify_token)),("f","Facebook","Facebook",bool(settings.apify_token)),("G","Google","Google",False),("in","LinkedIn","LinkedIn",False),("CSV","CSV-файлы","CSV",settings.supabase_configured)]:
+        count=int(counts.get(data_key,0)); status="Подключено" if ready else "Не подключено"; css="" if ready else " off"
+        cards.append(f'<div class="source-card"><div class="source-icon">{icon}</div><div class="source-name">{name}</div><div class="source-status{css}">● {status}</div><div class="source-count">{count} записей в текущем периоде</div></div>')
+    st.markdown('<div class="source-grid">'+''.join(cards)+'</div>',unsafe_allow_html=True)
+    st.markdown("### Импорт CSV")
+    uploaded = st.file_uploader("Выберите CSV-файл", type=["csv"], help="Колонки: source, author, rating, review_text, published_at")
+    if uploaded is not None:
+        try:
+            preview = pd.read_csv(uploaded)
+            required={"source","author","rating","review_text","published_at"}
+            missing=required-set(preview.columns)
+            if missing: st.error("Не хватает колонок: "+", ".join(sorted(missing)))
+            else:
+                st.dataframe(preview.head(10),hide_index=True,width="stretch")
+                if st.button("Импортировать в Supabase",disabled=not settings.supabase_configured):
+                    rows=preview[list(required)].copy(); rows["published_at"]=pd.to_datetime(rows["published_at"],errors="coerce",utc=True).astype(str); rows["analysis_status"]="pending"; rows["action_status"]="pending_review"
+                    count=insert_reviews(rows.to_dict("records")); st.cache_data.clear(); st.success(f"Импортировано записей: {count}")
+        except Exception as exc: st.error(f"Не удалось прочитать CSV: {exc}")
+
+elif view == "settings":
+    _page_header("Настройки", "Состояние подключений и параметры анализа")
+    left,right=st.columns([1.25,1])
+    with left:
+        st.markdown("### Подключения")
+        st.write(f"Supabase: **{'подключён' if settings.supabase_configured else 'не подключён'}**")
+        st.write(f"Gemini или Groq: **{'готов' if settings.ai_configured else 'не настроен'}**")
+        st.write(f"Apify: **{'подключён' if settings.apify_token else 'не подключён'}**")
+        st.caption("Секретные ключи задаются в .env локально или в Streamlit Secrets после deployment.")
+    with right:
+        st.markdown('<div class="connection-panel"><strong>GRATA INTERNATIONAL</strong><p>Sentiment Analyzer</p><p>Единый центр мониторинга клиентской обратной связи.</p></div>',unsafe_allow_html=True)
