@@ -24,6 +24,10 @@ class Settings:
     apify_facebook_actor: str = os.getenv("APIFY_FACEBOOK_ACTOR", "unseenuser/fb-posts").strip()
     apify_linkedin_actor: str = os.getenv("APIFY_LINKEDIN_ACTOR", "lightmoon/linkedin-company-posts-scraper").strip()
     grata_2gis_firm_id: str = os.getenv("GRATA_2GIS_FIRM_ID", "9429940000842633").strip()
+    grata_2gis_url: str = os.getenv("GRATA_2GIS_URL", "https://2gis.kz/almaty/firm/9429940000842633/tab/reviews").strip()
+    grata_instagram_url: str = os.getenv("GRATA_INSTAGRAM_URL", "https://www.instagram.com/grata_international/").strip()
+    grata_facebook_url: str = os.getenv("GRATA_FACEBOOK_URL", "https://www.facebook.com/gratanet/").strip()
+    grata_linkedin_url: str = os.getenv("GRATA_LINKEDIN_URL", "https://www.linkedin.com/company/grata/").strip()
 
     @property
     def supabase_configured(self) -> bool:

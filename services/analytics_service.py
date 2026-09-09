@@ -10,20 +10,50 @@ CATEGORY_LABELS = {
     "waiting_time": "Время ожидания", "other": "Другое",
 }
 
+# Star-rated review platforms reflect an explicit client experience. Short social
+# reactions are still monitored, but have a deliberately smaller impact on the
+# executive score.
+SOURCE_WEIGHTS = {"2GIS": 1.0, "Google": 1.0, "Yandex": 1.0, "CSV": 1.0,
+                  "Instagram": 0.05, "Facebook": 0.05, "LinkedIn": 0.05}
+
 
 def analyzed(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["analysis_status"].eq("done")].copy() if not df.empty else df.copy()
 
 
 def brand_health_score(df: pd.DataFrame) -> int:
-    """100 - 45×negative share - 25×critical share - 30×average normalized risk."""
+    """Weighted score: review platforms count fully; social comments count at 5%."""
     data = analyzed(df)
     if data.empty:
         return 0
-    negative_share = data["sentiment"].eq("negative").mean()
-    critical_share = (data["severity"].eq("critical") | data["risk_score"].ge(85)).mean()
-    avg_risk = data["risk_score"].mean() / 100
+    weights = data["source"].map(SOURCE_WEIGHTS).fillna(1.0)
+    total_weight = weights.sum()
+    negative_share = (weights * data["sentiment"].eq("negative")).sum() / total_weight
+    critical_share = (weights * (data["severity"].eq("critical") | data["risk_score"].ge(85))).sum() / total_weight
+    avg_risk = (weights * data["risk_score"]).sum() / total_weight / 100
     return round(max(0, min(100, 100 - 45 * negative_share - 25 * critical_share - 30 * avg_risk)))
+
+
+def brand_health_breakdown(df: pd.DataFrame) -> dict:
+    """Return the exact, human-readable components used for the current score."""
+    data = analyzed(df)
+    if data.empty:
+        return {"rated_reviews": 0, "social_comments": 0, "weighted_records": 0,
+                "negative_penalty": 0, "critical_penalty": 0, "risk_penalty": 0, "score": None}
+    weights = data["source"].map(SOURCE_WEIGHTS).fillna(1.0)
+    total_weight = weights.sum()
+    negative_penalty = 45 * (weights * data["sentiment"].eq("negative")).sum() / total_weight
+    critical_penalty = 25 * (weights * (data["severity"].eq("critical") | data["risk_score"].ge(85))).sum() / total_weight
+    risk_penalty = 30 * (weights * data["risk_score"]).sum() / total_weight / 100
+    social = data["source"].isin(["Instagram", "Facebook", "LinkedIn"])
+    return {
+        "rated_reviews": int((~social).sum()), "social_comments": int(social.sum()),
+        "weighted_records": round(float(total_weight), 2),
+        "negative_penalty": round(float(negative_penalty), 1),
+        "critical_penalty": round(float(critical_penalty), 1),
+        "risk_penalty": round(float(risk_penalty), 1),
+        "score": brand_health_score(data),
+    }
 
 
 def kpis(df: pd.DataFrame) -> dict:

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import re
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import requests
@@ -126,14 +126,17 @@ def collect_2gis(url: str, limit: int = 30) -> list[dict]:
 
 
 def collect_instagram(post_urls: list[str], limit: int = 500, max_posts: int = 50) -> list[dict]:
-    direct_post_urls = [url for url in post_urls if re.search(r"instagram\.com/(?:p|reel|tv)/", url)]
+    direct_post_urls = [url for url in post_urls if re.search(r"instagram\.com/(?:p|reel|reels|tv)/", url)]
     profile_urls = [url for url in post_urls if url not in direct_post_urls]
     if profile_urls:
         posts = _run_actor(settings.apify_instagram_posts_actor, {
             "directUrls": profile_urls, "resultsType": "posts", "resultsLimit": max_posts,
         })
+        reels = _run_actor(settings.apify_instagram_posts_actor, {
+            "directUrls": profile_urls, "resultsType": "reels", "resultsLimit": max_posts,
+        })
         discovered: list[str] = []
-        for post in posts:
+        for post in [*posts, *reels]:
             url = _pick(post, "url", "postUrl")
             if not url and post.get("shortCode"):
                 url = f"https://www.instagram.com/p/{post['shortCode']}/"
@@ -179,6 +182,27 @@ def collect_linkedin(company_urls: list[str], limit: int = 70) -> list[dict]:
                 "commentPermalink": _pick(comment, "commentUrl", "permalink", default=post_url),
             })
     return _normalize(comments, "LinkedIn", company_urls[0])
+
+
+def sync_configured_sources(progress: Callable[[str, int, int, dict], None] | None = None) -> dict[str, dict]:
+    """Check GRATA's configured public sources and safely save only new records."""
+    collectors = {
+        "2GIS": lambda: collect_2gis(settings.grata_2gis_url, limit=50),
+        "Instagram": lambda: collect_instagram([settings.grata_instagram_url], limit=500, max_posts=50),
+        "Facebook": lambda: collect_facebook([settings.grata_facebook_url], limit=200, max_posts=50),
+        "LinkedIn": lambda: collect_linkedin([settings.grata_linkedin_url], limit=70),
+    }
+    result: dict[str, dict] = {}
+    for position, (source, collector) in enumerate(collectors.items(), start=1):
+        try:
+            rows = collector()
+            saved = save_collected(rows)
+            result[source] = {"found": len(rows), "saved": saved, "duplicates": len(rows) - saved}
+        except ImportServiceError as exc:
+            result[source] = {"found": 0, "saved": 0, "duplicates": 0, "error": str(exc)}
+        if progress:
+            progress(source, position, len(collectors), result[source])
+    return result
 
 
 def save_collected(rows: list[dict]) -> int:

@@ -101,7 +101,8 @@ class ProductTests(unittest.TestCase):
         client = TestClient(app)
         for route in ["/", "/api/health", "/static/app.js", "/static/brand.css", "/fonts/TTNormsPro-Regular.ttf"]:
             self.assertEqual(client.get(route).status_code, 200)
-        self.assertEqual(client.post("/api/sync").status_code, 409)
+        with patch("backend.main.settings", SimpleNamespace(supabase_configured=False)):
+            self.assertEqual(client.post("/api/sync").status_code, 400)
 
 if __name__ == "__main__":
     unittest.main()

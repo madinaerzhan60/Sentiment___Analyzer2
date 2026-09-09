@@ -11,16 +11,19 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from services.analytics_service import brand_health_score, issue_stats, platform_stats, trend
+from services.analytics_service import brand_health_breakdown, brand_health_score, issue_stats, platform_stats, trend
 from services.pipeline_service import analyze_missing_confidence, analyze_pending
 from services.supabase_service import DataServiceError, fetch_reviews, insert_reviews
-from services.import_service import ImportServiceError, collect_linkedin, save_collected
+from services.import_service import ImportServiceError, collect_linkedin, save_collected, sync_configured_sources
 from utils.config import ROOT, settings
 
 app = FastAPI(title="Sentiment Analyzer", version="3.0.0")
 app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
 app.mount("/fonts", StaticFiles(directory=ROOT / "TTF"), name="fonts")
 write_lock = Lock()
+sync_lock = Lock()
+sync_status_lock = Lock()
+sync_status = {"running": False, "completed": 0, "total": 5, "current": "", "sources": {}, "saved": 0, "analyzed": 0, "failed": 0}
 SOURCES = ["Google", "2GIS", "Yandex", "Instagram", "Facebook", "LinkedIn", "CSV"]
 TOPICS = {"response_time": "Response time", "staff_behavior": "Staff conduct", "service_quality": "Service quality", "product_quality": "Product quality", "pricing": "Pricing", "communication": "Communication", "waiting_time": "Waiting time", "other": "Other feedback"}
 
@@ -87,7 +90,7 @@ def snapshot(days=None, start=None, end=None):
     return {
         "items": records(data.sort_values("published_at", ascending=False, na_position="last")),
         "meta": {"checked_at": now.isoformat(), "excluded_unverified": excluded, "latest": None if raw.published_at.dropna().empty else raw.published_at.max().isoformat(), "total_raw": len(raw), "unknown_dates": int(raw.published_at.isna().sum())},
-        "metrics": {"total": len(data), "analyzed": len(analyzed), "health": brand_health_score(analyzed) if len(analyzed) else None, "health_delta": brand_health_score(current) - brand_health_score(previous) if len(current) and len(previous) else None, "attention": int(attention.sum()), "critical": int(critical.sum()), "active_sources": int(data.source.nunique())},
+        "metrics": {"total": len(data), "analyzed": len(analyzed), "health": brand_health_score(analyzed) if len(analyzed) else None, "health_breakdown": brand_health_breakdown(analyzed), "health_delta": brand_health_score(current) - brand_health_score(previous) if len(current) and len(previous) else None, "attention": int(attention.sum()), "critical": int(critical.sum()), "active_sources": int(data.source.nunique())},
         "sentiments": {s: int(analyzed.sentiment.eq(s).sum()) for s in ["positive", "neutral", "negative"]},
         "issues": records(topics), "positive_themes": records(positive.sort_values("reviews", ascending=False)),
         "platforms": records(platform_stats(analyzed)), "trend": records(trend(analyzed)),
@@ -187,9 +190,46 @@ def import_csv(request: CSVImport):
     finally:
         write_lock.release()
 
+def _run_source_sync() -> None:
+    global sync_status
+    try:
+        def progress(source: str, completed: int, total: int, item: dict) -> None:
+            with sync_status_lock:
+                sync_status.update({"completed": completed, "total": total + 1, "current": source, "sources": {**sync_status["sources"], source: item}})
+        sources = sync_configured_sources(progress)
+        saved = sum(item["saved"] for item in sources.values())
+        with sync_status_lock:
+            sync_status.update({"completed": 4, "total": 5, "current": "AI analysis", "sources": sources, "saved": saved})
+        analysis = analyze_pending(limit=min(saved, 100)) if saved and settings.ai_configured else {"done": 0, "failed": 0}
+        with sync_status_lock:
+            sync_status.update({"completed": 5, "current": "Complete", "analyzed": analysis["done"], "failed": analysis["failed"], "running": False})
+    except Exception:
+        with sync_status_lock:
+            sync_status.update({"running": False, "current": "Could not complete source check"})
+    finally:
+        write_lock.release()
+        sync_lock.release()
+
 @app.post("/api/sync")
 def sync():
-    raise HTTPException(409, "Automatic platform collection is not enabled. Import an authorized CSV export from Sources.")
+    if not settings.supabase_configured:
+        raise HTTPException(400, "Configure Supabase first.")
+    if not settings.apify_token:
+        raise HTTPException(400, "Add APIFY_TOKEN on the server first.")
+    if not sync_lock.acquire(blocking=False):
+        raise HTTPException(409, "Another import or analysis is running. Please wait.")
+    if not write_lock.acquire(blocking=False):
+        sync_lock.release()
+        raise HTTPException(409, "Another import or analysis is running. Please wait.")
+    with sync_status_lock:
+        sync_status.update({"running": True, "completed": 0, "total": 5, "current": "Starting source check", "sources": {}, "saved": 0, "analyzed": 0, "failed": 0})
+    Thread(target=_run_source_sync, daemon=True).start()
+    return {"status": "started"}
+
+@app.get("/api/sync/status")
+def sync_state():
+    with sync_status_lock:
+        return dict(sync_status)
 
 class LinkedInCollection(BaseModel):
     company_url: str = Field(min_length=20, max_length=500)
