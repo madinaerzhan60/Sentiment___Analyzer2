@@ -79,7 +79,7 @@ function dashboard(){
  const delta=m.health_delta===null?"Comparison unavailable":(m.health_delta>0?"+":"")+m.health_delta+" pts · last 30 vs previous 30 days";
  const pos=total?d.sentiments.positive/total*100:0,neu=total?d.sentiments.neutral/total*100:0;
  const donut='<div class="sentiment"><div class="donut" style="background:conic-gradient(#20A464 0 '+pos+'%,#D99A22 '+pos+'% '+(pos+neu)+'%,#D64545 '+(pos+neu)+'% 100%)"><div><strong>'+total+'</strong><span>analyzed</span></div></div><div class="legend">'+Object.entries(d.sentiments).map(([k,v])=>'<div><i style="background:'+colors[k]+'"></i><span>'+k[0].toUpperCase()+k.slice(1)+'</span><b>'+v+' <small>'+ (total?Math.round(v/total*100):0)+'%</small></b></div>').join("")+'</div></div>';
- return head("Reputation overview","Understand client feedback. Focus on what matters.")+
+ return head("Sentiment Analyzer · GRATA","Understand client feedback. Focus on what matters.")+
  '<div class="metrics">'+metric('Reputation Score <span title="100 − 45 × negative share − 25 × critical share − 30 × average risk / 100. Based on analyzed reviews only." tabindex="0" class="info">ⓘ</span>',m.health===null?"—":m.health+'<em> / 100</em>',scoreNote,true)+metric("Total Reviews",m.total,m.analyzed+" analyzed")+metric("Needs Attention",m.attention,m.critical+" critical · includes negative feedback")+metric("Active Sources",m.active_sources,"Sources with feedback this period")+'</div><p class="comparison">'+esc(delta)+'</p>'+
  '<div class="grid two">'+card("Sentiment overview",total?donut:empty("Analysis is pending"),"Based on successfully analyzed reviews")+card("Top client concerns",bars(d.issues.slice(0,5),"#D64545"),"Negative reviews by topic")+'</div>'+
  '<section class="insight"><div>'+icon("insights")+'</div><div><p class="eyebrow">EXECUTIVE INSIGHT</p><h2>'+esc(summary())+'</h2><p>Calculated from saved review classifications; not a new AI audit.</p></div><button data-go="insights">View analysis '+icon("arrow")+'</button></section>'+
@@ -195,7 +195,7 @@ async function load(){
  const d=await api("/api/dashboard?"+q);state.data=d;state.config=d.config;state.page=1;
  $("#data-status summary").textContent="Database updated";
  $("#status-content").textContent="Supabase connected. Last checked: "+new Date(d.meta.checked_at).toLocaleTimeString("en-GB")+". Platform collection: manual import. Latest dated review: "+fmt(d.meta.latest)+".";
- $("#date-note").textContent=[d.meta.unknown_dates?d.meta.unknown_dates+" reviews have no date. Select All time to include them.":"",d.meta.excluded_unverified?d.meta.excluded_unverified+" unverified 2GIS records are excluded; originals remain in the database.":""].filter(Boolean).join(" ");
+ $("#date-note").textContent=[d.meta.unknown_dates?d.meta.unknown_dates+" reviews have no date. Select All time to include them.":""].filter(Boolean).join(" ");
  render();return true;
  }catch(e){state.data=null;state.config=await api("/api/config").catch(()=>null);$("#data-status summary").textContent="Data unavailable";$("#status-content").textContent="Database could not be reached. No example data is shown.";$("#error").textContent=e.message;$("#error").hidden=false;render();return false}
  finally{state.busy=false;$("#refresh").disabled=false;$("#period").disabled=false;$("#apply-dates").disabled=false}
