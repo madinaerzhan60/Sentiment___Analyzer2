@@ -2,13 +2,13 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.reviews (
   id uuid primary key default gen_random_uuid(),
-  source text not null check (source in ('Facebook', 'Instagram', '2GIS', 'Google', 'CSV')),
+  source text not null check (source in ('Facebook', 'Instagram', '2GIS', 'Google', 'Yandex', 'CSV')),
   author text not null default 'Anonymous',
   rating smallint not null default 0 check (rating between 0 and 5),
   review_text text not null,
   external_id text,
   source_url text,
-  published_at timestamptz not null,
+  published_at timestamptz,
   created_at timestamptz not null default now(),
   sentiment text check (sentiment in ('positive', 'neutral', 'negative')),
   category text check (category in ('response_time', 'staff_behavior', 'service_quality', 'product_quality', 'pricing', 'communication', 'waiting_time', 'other')),

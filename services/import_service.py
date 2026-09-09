@@ -52,10 +52,14 @@ def _pick(item: dict, *keys, default=None):
     return default
 
 
-def _date(item: dict) -> str:
+def _date(item: dict) -> str | None:
     value = _pick(item, "commentPublishTimeIso", "dateCreated", "timestamp", "createdAt", "created_time", "publishTimeIso", "time", "date")
-    parsed = pd.to_datetime(value, errors="coerce", utc=True)
-    return (parsed if pd.notna(parsed) else pd.Timestamp.now(tz="UTC")).isoformat()
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+        numeric = float(value)
+        parsed = pd.to_datetime(numeric, unit="ms" if numeric > 10**11 else "s", errors="coerce", utc=True)
+    else:
+        parsed = pd.to_datetime(value, errors="coerce", utc=True)
+    return parsed.isoformat() if pd.notna(parsed) else None
 
 
 def _normalize(items: list[dict], source: str, fallback_url: str) -> list[dict]:
@@ -93,13 +97,15 @@ def _with_nested_replies(items: list[dict]) -> list[dict]:
     """Flatten reply objects while retaining their parent post context."""
     expanded: list[dict] = []
     for item in items:
-        expanded.append(item)
+        # Post containers are not customer comments. Keep explicit comments only.
+        if not item.get("comments") or item.get("commentId") or item.get("commentText"):
+            expanded.append(item)
         replies = _pick(item, "commentReplies", "replies", "comments", default=[])
         if not isinstance(replies, list):
             continue
         for reply in replies:
             if isinstance(reply, dict):
-                expanded.append({**item, **reply, "commentReplies": [], "replies": [], "comments": []})
+                expanded.extend(_with_nested_replies([{**{k: v for k, v in item.items() if k in {"postUrl", "inputUrl"}}, **reply}]))
     return expanded
 
 

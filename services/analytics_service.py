@@ -21,7 +21,7 @@ def brand_health_score(df: pd.DataFrame) -> int:
     if data.empty:
         return 0
     negative_share = data["sentiment"].eq("negative").mean()
-    critical_share = data["severity"].eq("critical").mean()
+    critical_share = (data["severity"].eq("critical") | data["risk_score"].ge(85)).mean()
     avg_risk = data["risk_score"].mean() / 100
     return round(max(0, min(100, 100 - 45 * negative_share - 25 * critical_share - 30 * avg_risk)))
 

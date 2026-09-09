@@ -1,106 +1,63 @@
-# Sentiment Analyzer
+# Sentiment Analyzer · GRATA International
 
-Sentiment Analyzer turns imported customer reviews into an explainable management dashboard for one company. It highlights reputation health, sentiment trends, risky feedback, platform patterns, complaint themes, and AI-supported actions. The visual demo works immediately with 40 bundled Russian, Kazakh, and mixed-language reviews; Supabase enables persistent live data and human decisions.
+Private client-feedback dashboard. HTML/CSS/JavaScript frontend, FastAPI Python backend, Pandas analytics, Supabase/PostgreSQL storage, Gemini → Groq structured analysis, python-dotenv configuration. Local TT Norms Pro and the supplied GRATA logo are preserved.
 
-## Architecture
-
-- `app.py` — Streamlit shell, global filters, overview, and cached reads
-- `pages/` — analytics, AI Risk Center, and searchable review registry
-- `services/supabase_service.py` — Supabase reads and uncached writes
-- `services/ai_service.py` — validated JSON analysis through Gemini, then Groq fallback
-- `services/analytics_service.py` — Pandas calculations and management findings
-- `components/` — reusable metrics, charts, and risk cards
-- `scripts/` — CSV import and one-time batch analysis
-- `supabase_schema.sql` — PostgreSQL table, constraints, and indexes
-
-AI output is stored on each review. Streamlit reads that stored analysis; it does not call an AI model during page reruns.
-
-## Install
-
-Python 3.10+ is recommended.
-
-```bash
-python -m venv .venv
+## Run locally
+```sh
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
+uvicorn app:app --host 127.0.0.1 --port 8501
 ```
+Open http://127.0.0.1:8501. Set SUPABASE_URL and SUPABASE_KEY in the server's .env. Set GEMINI_API_KEY and optionally GROQ_API_KEY for analysis. GEMINI_MODEL and GROQ_MODEL are configurable. Never commit secrets. The browser receives no keys.
 
-## Environment variables
+## Existing database
+For a new database run supabase_schema.sql. For an existing database run migrations/001_optional_dates_and_yandex.sql in Supabase SQL Editor before importing missing dates or Yandex reviews. This removes the required-date restriction and extends the supported source constraint; it does not delete or rewrite reviews. The migration is provided, not applied automatically.
 
-Set values in `.env` (never commit it):
+Missing or unavailable databases show an explicit error, never demo reviews. The application reads every page, not only Supabase's default result limit. Stored records and completed AI analyses remain unchanged.
 
-```dotenv
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-server-side-key
-GEMINI_API_KEY=your-gemini-key
-GROQ_API_KEY=optional-fallback-key
-GEMINI_MODEL=gemini-3.6-flash
-GROQ_MODEL=openai/gpt-oss-20b
-APIFY_TOKEN=your-apify-token
+Existing 2GIS rows without the configured GRATA firm ID in their source reference are excluded from the GRATA dashboard, not deleted. The excluded count is displayed. Source ownership for manually imported social comments remains the importer's responsibility.
+
+## Pages
+- Dashboard: score, review count, attention count, source count, sentiment, concerns, source distribution, recent feedback.
+- Reviews: search, source/sentiment filters, pagination, keyboard-accessible detail dialog, original text and safe source links.
+- Analytics: monthly sentiment counts, volume (including pending records), source totals, complaint topics and positive themes.
+- AI Insights: critical, attention, positive and watch groups; explicitly runs analysis for up to 50 pending/failed rows.
+- Sources: six manual-import channels, stored counts and dates, validated UTF-8 CSV import.
+- Reports: five report views, browser Print / Save as PDF and period-review CSV export. Reports are not stored.
+- Settings: honest configuration information; no simulated user management or notifications.
+
+All interface copy is English. Original feedback is never translated or changed. Legacy non-English analysis is represented by a short English description grounded in its saved classification, not presented as a translation. New model summaries and actions are requested in English.
+
+## Import and analysis
+CSV requires source and review_text. Optional columns: author, published_at (ISO date), rating (0–5, 0 means unavailable), external_id, source_url. Up to 1,000 rows and 2 MB. Supported names: Google / Google Maps, 2GIS, Yandex / Yandex Maps, Instagram, Facebook, CSV / CSV Import.
+
+Missing dates remain null; invalid/future dates and unsafe URL schemes are rejected. All time includes unknown dates; dated filters do not. Original text is retained. Identity is source + external_id, with a deterministic source/author/text/date fallback. Reimports skip existing identities without overwriting their analysis. Partial import failures can be retried safely.
+
+The import screen can analyze pending reviews after saving (up to 50). Other pending reviews may be included in that batch. Completed analysis is never repeated. Provider failures leave records available for retry. Refresh only rereads the database: it does not collect from social platforms and does not incur AI calls.
+
+Legacy Apify functions remain in services/import_service.py for reference but the web collection endpoint is disabled. No official platform authorization or scheduled collection is implemented. Use authorized manual exports; do not assume an API token establishes permitted access.
+
+## Score and interpretation
+100 − 45 × negative share − 25 × critical share − 30 × average risk / 100.
+Critical means severity critical or triage score ≥ 85. Shares use analyzed feedback only. Empty analysis shows no score. This is an explainable triage indicator, not a scientific probability.
+
+Needs Attention counts negative, high/critical severity or score ≥ 85 reviews once. Critical is a subset, not an additional count. Resolved workflow tracking is not implemented.
+
+The comparison is explicitly the most recent 30 days versus preceding 30 days, regardless of the selected display period. If either period has no analysis, comparison is unavailable. Executive findings are calculated from saved classifications, not fresh AI audits.
+
+## Code layout
+backend/main.py serves the API and frontend. services/ contains the retained database, analytics and analysis code. frontend/brand.css is the active consolidated stylesheet; styles.css and pages/components are legacy Streamlit assets, not loaded by this app. No new Streamlit pages should be added to the FastAPI UI.
+
+## Safety and deployment
+This is an internal app without built-in authentication. Bind locally or deploy behind an authenticated organizational proxy/VPN and HTTPS. Do not expose a service-role-backed write API publicly. No public deployment or Git push is performed by the UI update.
+
+## Tests
+```sh
+python3 -m unittest discover -s tests -v
+node --check frontend/app.js
 ```
+Tests use mocked data/services and do not modify Supabase or call paid AI providers. They cover empty/error states, filters, period comparison, source verification, date preservation, CSV validation, safe URL handling, deduplication, paginated reads, social-reaction rules, JSON recovery and static/API routes.
 
-Gemini is attempted first. Groq is used only if Gemini fails. If neither succeeds, the review is marked `failed` and the UI continues with a clear unavailable message. Errors never trigger fabricated regex recommendations.
-
-For a private server deployment, keep the Supabase service-role key server-side. Do not place it in browser code or commit it. If using an authenticated/anon key instead, define suitable row-level security policies for your organization.
-
-## Supabase setup
-
-1. Create a Supabase project.
-2. Open its SQL Editor and run `supabase_schema.sql`.
-3. Add `SUPABASE_URL` and `SUPABASE_KEY` to `.env`.
-
-The raw `review_text` is always retained. `analysis_status` moves through `pending → processing → done`; a provider failure becomes `failed`. The unique review identity makes repeated CSV imports safe. Writes are never Streamlit-cached.
-
-## Import data
-
-The in-app **Загрузить данные** page can collect real public 2GIS reviews and
-Instagram/Facebook post comments through configurable Apify actors. This is an
-unofficial scraping integration and may be affected by platform changes or actor
-pricing. Use it only where your legal basis and the platforms' terms permit.
-
-Import the bundled, pre-analyzed demo dataset:
-
-```bash
-python scripts/seed_reviews.py
-```
-
-Import any compatible CSV as raw reviews queued for AI analysis:
-
-```bash
-python scripts/seed_reviews.py path/to/reviews.csv --raw-only
-```
-
-Required CSV columns are `source`, `author`, `rating`, `review_text`, and `published_at`. Supported sources are Facebook, Instagram, 2GIS, Google, and CSV.
-
-## Analyze pending reviews once
-
-```bash
-python scripts/analyze_reviews.py
-```
-
-The script claims only `pending` or `failed` rows, validates the structured result, and saves it permanently. Rows already marked `done` are skipped. Run this after an import—not from a Streamlit rerun. Retrying a failed row is intentional; completed rows do not incur another model call.
-
-## Run
-
-```bash
-streamlit run app.py
-```
-
-Without Supabase credentials, the app enters a read-only demo mode using `data/sample_reviews.csv`. With credentials, it reads Supabase and action buttons persist management decisions. An empty database and connection errors are handled without an application traceback.
-
-## Brand Health formula
-
-The score is a consistent management indicator, not a scientifically validated probability:
-
-`100 − (45 × negative share) − (25 × critical share) − (30 × normalized average risk)`
-
-It is clamped to 0–100 and calculated only from successfully analyzed reviews in the selected period.
-
-## MVP limitations
-
-- The current MVP uses manually imported review data.
-- Facebook, Instagram, Google, and 2GIS scraping is **not** implemented.
-- Official platform API integrations, authentication, multi-tenancy, scheduled ingestion, and model-quality evaluation are future work.
-- AI classifications and recommendations can be wrong; they are triage suggestions subject to human review.
-- The bundled executive summary is derived from stored analysis with Pandas, avoiding repeated model calls.
+## Icon provenance
+Google Maps, Instagram and Facebook shapes: Simple Icons 13.21.0 (CC0; brand trademarks remain their owners'). 2GIS logo: official docs.2gis.com/en/assets/logo/2gis/en/logo-light.svg. Yandex Maps: official maps.yastatic.net favicon asset. Assets are local; no third-party asset requests are required at runtime. Use the supplied TT Norms Pro font only where your license permits.

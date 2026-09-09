@@ -25,15 +25,18 @@ def get_client():
 
 
 def fetch_reviews() -> pd.DataFrame:
-    """Return reviews; use bundled analyzed data only when Supabase is unconfigured."""
+    """Read every page. Never substitute sample data for production failures."""
     if not settings.supabase_configured:
-        try:
-            return normalize_reviews(pd.read_csv(ROOT / "data" / "sample_reviews.csv"))
-        except Exception as exc:
-            raise DataServiceError(f"Could not load demo data: {exc}") from exc
+        raise DataServiceError("Supabase is not configured.")
     try:
-        result = get_client().table("reviews").select("*").order("published_at", desc=True).execute()
-        return normalize_reviews(pd.DataFrame(result.data or []))
+        rows = []
+        while True:
+            page = (get_client().table("reviews").select("*").order("id")
+                    .range(len(rows), len(rows) + 499).execute()).data or []
+            rows.extend(page)
+            if len(page) < 500:
+                break
+        return normalize_reviews(pd.DataFrame(rows))
     except Exception as exc:
         raise DataServiceError(f"Could not load reviews from Supabase: {exc}") from exc
 
@@ -60,44 +63,46 @@ def normalize_reviews(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def insert_reviews(rows: list[dict[str, Any]]) -> int:
+    """Insert only new identities; preserve existing originals and saved analysis."""
+    import hashlib
     if not settings.supabase_configured:
         raise DataServiceError("Configure Supabase before importing reviews.")
     try:
-        client = get_client()
-        deduplicated: dict[tuple[str, str], dict[str, Any]] = {}
-        without_external: list[dict[str, Any]] = []
-        for row in rows:
-            external_id = str(row.get("external_id") or "").strip()
-            if external_id:
-                deduplicated[(str(row.get("source", "")), external_id)] = row
-            else:
-                without_external.append(row)
-
-        new_rows: list[dict[str, Any]] = []
-        for source in {key[0] for key in deduplicated}:
-            source_rows = {key[1]: value for key, value in deduplicated.items() if key[0] == source}
-            existing = (client.table("reviews").select("id,external_id").eq("source", source)
-                        .in_("external_id", list(source_rows)).execute())
-            existing_by_external = {str(item["external_id"]): str(item["id"]) for item in (existing.data or [])}
-            for external_id, row in source_rows.items():
-                if external_id in existing_by_external:
-                    raw_update = {key: value for key, value in row.items() if key not in {
-                        "sentiment", "category", "severity", "risk_score", "summary",
-                        "recommendation", "suggested_response", "analysis_status",
-                        "analysis_provider", "analyzed_at", "action_status",
-                    }}
-                    client.table("reviews").update(raw_update).eq("id", existing_by_external[external_id]).execute()
-                else:
-                    new_rows.append(row)
-
-        pending = new_rows + without_external
-        if pending:
-            client.table("reviews").upsert(
-                pending, on_conflict="source,author,published_at,review_text"
-            ).execute()
-        return len(deduplicated) + len(without_external)
+        existing = fetch_reviews()
+        identities = {(str(r.source), str(r.external_id)) for r in existing.itertuples() if r.external_id}
+        def identity(row):
+            date = pd.to_datetime(row.get("published_at"), errors="coerce", utc=True)
+            return (str(row.get("source", "")), str(row.get("author") or "Anonymous"),
+                    str(row.get("review_text", "")).strip(), date.isoformat() if pd.notna(date) else "")
+        raw_keys = {identity(r) for r in existing.to_dict("records")}
+        count = 0
+        for original in rows:
+            row = dict(original)
+            raw_key = identity(row)
+            external = str(row.get("external_id") or "").strip()
+            if not external:
+                external = "sha256:" + hashlib.sha256(json_identity(raw_key).encode()).hexdigest()
+            key = (row["source"], external)
+            if key in identities or raw_key in raw_keys:
+                continue
+            row["external_id"] = external
+            try:
+                result = get_client().table("reviews").insert(row).execute()
+                count += len(result.data or [])
+            except Exception as exc:
+                # A concurrent import may win the unique constraint. Never overwrite it.
+                if str(getattr(exc, "code", "")) != "23505":
+                    raise
+            identities.add(key)
+            raw_keys.add(raw_key)
+        return count
     except Exception as exc:
-        raise DataServiceError(f"Could not import reviews: {exc}") from exc
+        raise DataServiceError("Could not import reviews. Check database schema and permissions.") from exc
+
+
+def json_identity(value) -> str:
+    import json
+    return json.dumps(value, ensure_ascii=False)
 
 
 def claim_review(review_id: str) -> bool:
