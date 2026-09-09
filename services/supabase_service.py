@@ -48,7 +48,7 @@ def normalize_reviews(df: pd.DataFrame) -> pd.DataFrame:
         "review_text": "", "source_url": "", "external_id": "",
         "published_at": pd.NaT, "created_at": pd.NaT,
         "sentiment": "", "category": "other", "severity": "",
-        "risk_score": 0, "summary": "", "recommendation": "",
+        "risk_score": 0, "confidence": None, "summary": "", "recommendation": "",
         "suggested_response": "", "analysis_status": "pending",
         "action_status": "pending_review", "analysis_provider": "",
     }
@@ -59,6 +59,7 @@ def normalize_reviews(df: pd.DataFrame) -> pd.DataFrame:
         df[column] = pd.to_datetime(df[column], errors="coerce", utc=True, format="mixed")
     df["rating"] = pd.to_numeric(df["rating"], errors="coerce").fillna(0).astype(int)
     df["risk_score"] = pd.to_numeric(df["risk_score"], errors="coerce").fillna(0).clip(0, 100)
+    df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce").clip(0, 100)
     return df
 
 
@@ -123,6 +124,12 @@ def save_analysis(review_id: str, analysis: dict[str, Any], provider: str) -> No
         get_client().table("reviews").update(payload).eq("id", review_id).execute()
     except Exception as exc:
         raise DataServiceError(f"Could not save analysis for {review_id}: {exc}") from exc
+
+def save_confidence(review_id: str, confidence: int) -> None:
+    try:
+        get_client().table("reviews").update({"confidence": confidence}).eq("id", review_id).execute()
+    except Exception as exc:
+        raise DataServiceError("Could not save confidence. Run the database confidence migration first.") from exc
 
 
 def mark_analysis_failed(review_id: str) -> None:

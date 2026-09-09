@@ -22,6 +22,7 @@ class Settings:
     apify_instagram_actor: str = os.getenv("APIFY_INSTAGRAM_ACTOR", "apify/instagram-comment-scraper").strip()
     apify_instagram_posts_actor: str = os.getenv("APIFY_INSTAGRAM_POSTS_ACTOR", "apify/instagram-scraper").strip()
     apify_facebook_actor: str = os.getenv("APIFY_FACEBOOK_ACTOR", "unseenuser/fb-posts").strip()
+    apify_linkedin_actor: str = os.getenv("APIFY_LINKEDIN_ACTOR", "lightmoon/linkedin-company-posts-scraper").strip()
     grata_2gis_firm_id: str = os.getenv("GRATA_2GIS_FIRM_ID", "9429940000842633").strip()
 
     @property

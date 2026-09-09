@@ -157,6 +157,30 @@ def collect_facebook(post_urls: list[str], limit: int = 500, max_posts: int = 0)
     return _normalize(_with_nested_replies(items), "Facebook", post_urls[0])
 
 
+def collect_linkedin(company_urls: list[str], limit: int = 70) -> list[dict]:
+    """Collect public comments on a LinkedIn company page through the configured Apify Actor."""
+    items = _run_actor(settings.apify_linkedin_actor, {
+        "companies": company_urls,
+        "maxPostsPerSource": min(limit, 70),
+        "includeComments": True,
+    })
+    comments: list[dict] = []
+    for post in items:
+        post_url = str(_pick(post, "postUrl", "url", default=company_urls[0]))
+        post_id = str(_pick(post, "postId", "id", default=""))
+        for index, comment in enumerate(_pick(post, "commentList", "comments", default=[])):
+            if not isinstance(comment, dict):
+                continue
+            comments.append({
+                "commentText": _pick(comment, "text", "commentText"),
+                "commentAuthorName": _pick(comment, "authorName", "commentAuthorName"),
+                "commentId": _pick(comment, "commentId", "id", default=f"{post_id}-{index}"),
+                "commentedAt": _pick(comment, "commentedAt", "createdAt"),
+                "commentPermalink": _pick(comment, "commentUrl", "permalink", default=post_url),
+            })
+    return _normalize(comments, "LinkedIn", company_urls[0])
+
+
 def save_collected(rows: list[dict]) -> int:
     if not rows:
         return 0

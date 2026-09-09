@@ -1,6 +1,7 @@
 """Private management UI: consistent snapshots and explicit imports."""
 from datetime import date
 from threading import Lock
+from threading import Thread
 from urllib.parse import urlparse
 import csv
 import io
@@ -11,16 +12,34 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from services.analytics_service import brand_health_score, issue_stats, platform_stats, trend
-from services.pipeline_service import analyze_pending
+from services.pipeline_service import analyze_missing_confidence, analyze_pending
 from services.supabase_service import DataServiceError, fetch_reviews, insert_reviews
+from services.import_service import ImportServiceError, collect_linkedin, save_collected
 from utils.config import ROOT, settings
 
 app = FastAPI(title="Sentiment Analyzer", version="3.0.0")
 app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
 app.mount("/fonts", StaticFiles(directory=ROOT / "TTF"), name="fonts")
 write_lock = Lock()
-SOURCES = ["Google", "2GIS", "Yandex", "Instagram", "Facebook", "CSV"]
+SOURCES = ["Google", "2GIS", "Yandex", "Instagram", "Facebook", "LinkedIn", "CSV"]
 TOPICS = {"response_time": "Response time", "staff_behavior": "Staff conduct", "service_quality": "Service quality", "product_quality": "Product quality", "pricing": "Pricing", "communication": "Communication", "waiting_time": "Waiting time", "other": "Other feedback"}
+
+def _backfill_confidence() -> None:
+    """One-time background enrichment for saved analyses that predate confidence."""
+    if not settings.supabase_configured or not settings.ai_configured:
+        return
+    try:
+        while True:
+            result = analyze_missing_confidence(limit=50)
+            if result["total"] == 0:
+                break
+    except Exception:
+        # The dashboard remains available if an AI provider or the migration is unavailable.
+        return
+
+@app.on_event("startup")
+def start_confidence_backfill() -> None:
+    Thread(target=_backfill_confidence, daemon=True).start()
 
 def records(df):
     return json.loads(df.to_json(orient="records", date_format="iso"))
@@ -107,6 +126,20 @@ def analyze(limit: int = Query(50, ge=1, le=500)):
     finally:
         write_lock.release()
 
+@app.post("/api/analyze-confidence")
+def analyze_confidence(limit: int = Query(50, ge=1, le=500)):
+    if not settings.supabase_configured or not settings.ai_configured:
+        raise HTTPException(400, "Configure the database and an AI provider on the server first.")
+    if not write_lock.acquire(blocking=False):
+        raise HTTPException(409, "Another import or analysis is running. Please wait.")
+    try:
+        result = analyze_missing_confidence(limit)
+        return {k: result[k] for k in ("total", "done", "failed")}
+    except Exception as exc:
+        raise HTTPException(502, "Confidence analysis could not finish. Existing review analysis remains unchanged.") from exc
+    finally:
+        write_lock.release()
+
 class CSVImport(BaseModel):
     content: str = Field(max_length=2_000_000)
 
@@ -157,6 +190,30 @@ def import_csv(request: CSVImport):
 @app.post("/api/sync")
 def sync():
     raise HTTPException(409, "Automatic platform collection is not enabled. Import an authorized CSV export from Sources.")
+
+class LinkedInCollection(BaseModel):
+    company_url: str = Field(min_length=20, max_length=500)
+    limit: int = Field(default=70, ge=1, le=70)
+
+@app.post("/api/collect/linkedin")
+def collect_linkedin_comments(request: LinkedInCollection):
+    if not settings.supabase_configured:
+        raise HTTPException(400, "Configure Supabase first.")
+    if not settings.apify_token:
+        raise HTTPException(400, "Add APIFY_TOKEN on the server first.")
+    parsed = urlparse(request.company_url)
+    if parsed.hostname not in {"www.linkedin.com", "linkedin.com"} or "/company/" not in parsed.path:
+        raise HTTPException(400, "Use a public LinkedIn company-page URL.")
+    if not write_lock.acquire(blocking=False):
+        raise HTTPException(409, "Another import or analysis is running. Please wait.")
+    try:
+        rows = collect_linkedin([request.company_url], request.limit)
+        saved = save_collected(rows)
+        return {"found": len(rows), "saved": saved, "duplicates": len(rows) - saved}
+    except ImportServiceError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    finally:
+        write_lock.release()
 
 @app.get("/api/health")
 def health():

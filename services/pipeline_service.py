@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from services.ai_service import AnalysisUnavailable, analyze_review
-from services.supabase_service import DataServiceError, claim_review, fetch_reviews, mark_analysis_failed, save_analysis
+from services.ai_service import AnalysisUnavailable, analyze_confidence, analyze_review
+from services.supabase_service import DataServiceError, claim_review, fetch_reviews, mark_analysis_failed, save_analysis, save_confidence
 
 
 def analyze_pending(limit: int = 50, progress: Callable[[int, int], None] | None = None) -> dict:
@@ -28,4 +28,22 @@ def analyze_pending(limit: int = 50, progress: Callable[[int, int], None] | None
                 pass
         if progress:
             progress(position, len(queue))
+    return result
+
+def analyze_missing_confidence(limit: int = 50) -> dict:
+    """Add confidence to saved analyses without changing sentiment, risk, or recommendations."""
+    reviews = fetch_reviews()
+    queue = reviews[reviews["analysis_status"].eq("done") & reviews["confidence"].isna()].head(limit)
+    result = {"total": len(queue), "done": 0, "failed": 0, "errors": []}
+    for _, review in queue.iterrows():
+        try:
+            confidence, _ = analyze_confidence(
+                str(review["review_text"]), str(review["sentiment"]),
+                str(review["category"]), str(review["source"]),
+            )
+            save_confidence(str(review["id"]), confidence)
+            result["done"] += 1
+        except (AnalysisUnavailable, DataServiceError) as exc:
+            result["failed"] += 1
+            result["errors"].append(str(exc))
     return result

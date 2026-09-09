@@ -4,7 +4,7 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
 const state = {data:null, view:"dashboard", page:1, query:"", source:"", sentiment:"", busy:false, report:"Executive Reputation Summary", config:null};
 const topics = {response_time:"Response time",staff_behavior:"Staff conduct",service_quality:"Service quality",product_quality:"Product quality",pricing:"Pricing",communication:"Communication",waiting_time:"Waiting time",other:"Other feedback"};
 const colors = {positive:"#20A464",neutral:"#D99A22",negative:"#D64545"};
-const names = {Google:"Google Maps",Yandex:"Yandex Maps",CSV:"CSV Import"};
+const names = {Google:"Google Maps",Yandex:"Yandex Maps",LinkedIn:"LinkedIn",CSV:"CSV Import"};
 const nav = {dashboard:"Dashboard",reviews:"Reviews",analytics:"Analytics",insights:"AI Insights",sources:"Sources",reports:"Reports",settings:"Settings"};
 const paths = {
 dashboard:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -20,7 +20,7 @@ arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',chevron:'<path d="m9 5 7 7-7 7"/>',
 };
 function icon(name){return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+(paths[name]||paths.reviews)+'</svg>'}
 function platform(source){
- const assets={Google:"googlemaps",Instagram:"instagram",Facebook:"facebook","2GIS":"2gis",Yandex:"yandexmaps"};
+ const assets={Google:"googlemaps",Instagram:"instagram",Facebook:"facebook",LinkedIn:"linkedin","2GIS":"2gis",Yandex:"yandexmaps"};
  if(assets[source])return '<img class="platform '+assets[source]+'" src="/static/icons/'+assets[source]+'.svg" alt="'+esc(names[source]||source)+'">';
  return '<svg class="platform" role="img" aria-label="CSV Import" viewBox="0 0 24 24"><path d="M14 2H4v20h16V8zM14 2v6h6M7 13h10M7 17h10M11 10v10" fill="none" stroke="#667085" stroke-width="1.6"/></svg>';
 }
@@ -28,12 +28,40 @@ const fmt = v => v && !isNaN(new Date(v)) ? new Date(v).toLocaleDateString("en-G
 const sentiment = r => r.analysis_status==="done" && colors[r.sentiment] ? r.sentiment : "pending";
 const urgent = r => sentiment(r)!=="pending" && (r.severity==="critical" || r.risk_score>=85);
 const attention = r => sentiment(r)!=="pending" && (r.sentiment==="negative" || ["high","critical"].includes(r.severity) || r.risk_score>=85);
-const badge = r => '<span class="badge '+sentiment(r)+'">'+({positive:"Positive",neutral:"Neutral",negative:"Negative",pending:"Not analyzed"}[sentiment(r)])+'</span>';
+function sentimentIcon(kind){
+ return '<span class="sentiment-emoji" aria-hidden="true">'+({positive:"😊",neutral:"😐",negative:"☹️",pending:"⏳"}[kind])+'</span>';
+}
+const badge = r => {const kind=sentiment(r);return '<span class="badge '+kind+'">'+sentimentIcon(kind)+({positive:"Positive",neutral:"Neutral",negative:"Negative",pending:"Not analyzed"}[kind])+'</span>'};
 function safeURL(v){try{const u=new URL(v);return ["https:","http:"].includes(u.protocol)?u.href:null}catch{return null}}
 function empty(title,sub="Try another period or import feedback from Sources."){return '<div class="empty"><strong>'+esc(title)+'</strong><p>'+esc(sub)+'</p></div>'}
 function head(title,sub){return '<div class="page-head"><p class="eyebrow">GRATA INTERNATIONAL · KAZAKHSTAN</p><h1>'+title+'</h1><p>'+sub+'</p></div>'}
 function card(title,body,sub=""){return '<section class="card"><h2>'+title+'</h2>'+(sub?'<p class="muted">'+sub+'</p>':"")+body+'</section>'}
 function rows(items){return items.length?items.map(r=>'<button class="review-row" data-review="'+esc(r.id)+'">'+platform(r.source)+'<span class="review-copy"><span class="author">'+esc(r.author||"Anonymous")+' <span class="date">'+esc(fmt(r.published_at))+'</span></span><span class="preview">'+esc(r.review_text)+'</span></span>'+badge(r)+icon("chevron")+'</button>').join(""):empty("No reviews found");}
+function briefSummary(r){
+ const s=sentiment(r),topic=topics[r.category]||"Other feedback",stored=String(r.summary||"");
+ const english=stored&&!/[^\u0000-\u024f\s\p{P}]/u.test(stored);
+ if(s==="pending")return "Analysis pending.";
+ if(english)return stored.split(/\s+/).slice(0,12).join(" ");
+ if(s==="positive")return "Positive feedback about the client experience.";
+ if(s==="negative")return "Concern about "+topic.toLowerCase()+".";
+ return "No clear positive or negative signal.";
+}
+function confidenceCell(r){
+ const value=r.confidence===null||r.confidence===""?NaN:Number(r.confidence);
+ if(!Number.isFinite(value))return '<div class="confidence-cell unavailable"><b>—</b><small>Not recorded</small></div>';
+ const score=Math.max(0,Math.min(100,value));
+ return '<div class="confidence-cell"><div class="confidence-meter"><span style="width:'+score+'%"></span></div><b>'+score+'%</b><small>AI confidence</small></div>';
+}
+function riskBadge(r){
+ const score=Math.max(0,Math.min(100,Number(r.risk_score)||0));
+ const level=urgent(r)?"high":r.severity==="medium"||score>=45?"medium":"low";
+ const arrow={low:"↓",medium:"→",high:"↑"}[level];
+ return '<span class="risk-badge '+level+'"><b class="risk-arrow">'+arrow+'</b>'+({low:"Low",medium:"Medium",high:"High"}[level])+'</span>';
+}
+function reviewTable(items,start){
+ if(!items.length)return empty("No reviews found");
+ return '<section class="reviews-table"><div class="reviews-table-head"><span>#</span><span>Review</span><span>Sentiment</span><span>Confidence</span><span>Risk</span><span>Summary</span></div>'+items.map((r,index)=>'<button class="light-review-row" data-review="'+esc(r.id)+'"><span class="review-number">'+(start+index+1)+'</span><span class="table-review"><em>'+esc(r.review_text)+'</em><small>'+platform(r.source)+esc(names[r.source]||r.source)+' · '+esc(fmt(r.published_at))+'</small></span><span>'+badge(r)+'</span>'+confidenceCell(r)+'<span>'+riskBadge(r)+'</span><span class="table-summary">'+esc(briefSummary(r))+'</span></button>').join("")+'</section>';
+}
 function bars(items,color="#0D123F"){
  const max=Math.max(1,...items.map(x=>x.reviews??x.count));
  return items.length?items.map(x=>'<div class="bar"><div><span>'+esc(x.issue||names[x.name]||x.name||x.source)+'</span><b>'+(x.reviews??x.count)+'</b></div><div class="track"><span style="width:'+((x.reviews??x.count)/max*100)+'%;background:'+color+'"></span></div></div>').join(""):empty("No matching feedback","There is not enough data for this chart.");
@@ -63,18 +91,24 @@ function filtered(){
 function reviews(){
  const list=filtered().sort((a,b)=>Number(urgent(b))-Number(urgent(a))||((Date.parse(b.published_at)||0)-(Date.parse(a.published_at)||0)));
  const pages=Math.max(1,Math.ceil(list.length/10));state.page=Math.min(state.page,pages);
- return head("All reviews","Read original feedback and open a review for its analysis.")+
- '<div class="filters"><label>Search reviews<input id="search" placeholder="Author or review text" value="'+esc(state.query)+'"></label><label>Source<select id="source-filter"><option value="">All sources</option>'+state.data.sources.map(s=>'<option '+(s.name===state.source?"selected":"")+' value="'+esc(s.name)+'">'+esc(names[s.name]||s.name)+'</option>').join("")+'</select></label><label>Sentiment<select id="sentiment-filter">'+Object.entries({"":"All sentiments",positive:"Positive",neutral:"Neutral",negative:"Negative",pending:"Not analyzed",attention:"Needs attention"}).map(([v,t])=>'<option '+(v===state.sentiment?"selected":"")+' value="'+v+'">'+t+'</option>').join("")+'</select></label></div><section class="card list-card"><div class="list-caption">'+list.length+' reviews · critical issues first</div>'+rows(list.slice((state.page-1)*10,state.page*10))+'<div class="pagination"><span>Page '+state.page+' of '+pages+'</span><div><button data-page="-1" '+(state.page===1?"disabled":"")+'>Previous</button><button data-page="1" '+(state.page>=pages?"disabled":"")+'>Next</button></div></div></section>';
+ const choices=[["","All"],["positive","Positive"],["negative","Negative"],["neutral","Neutral"],["attention","Needs attention"]];
+ const start=(state.page-1)*10;
+ return head("All reviews","Browse feedback from all sources.")+
+ '<section class="reviews-controls"><div class="reviews-control-top"><strong>'+list.length+' reviews</strong><button id="export" class="export-button">Export CSV</button></div><div class="sentiment-tabs" aria-label="Filter reviews by sentiment">'+choices.map(([value,label])=>'<button data-review-filter="'+value+'" class="'+(state.sentiment===value?"active":"")+'">'+label+'</button>').join("")+'</div><div class="filters review-filters"><label class="review-search">Search reviews<input id="search" placeholder="Search reviews or authors" value="'+esc(state.query)+'"></label><label class="review-source">Source<select id="source-filter"><option value="">All sources</option>'+state.data.sources.map(s=>'<option '+(s.name===state.source?"selected":"")+' value="'+esc(s.name)+'">'+esc(names[s.name]||s.name)+'</option>').join("")+'</select></label></div></section>'+reviewTable(list.slice(start,state.page*10),start)+'<div class="pagination"><span>Page '+state.page+' of '+pages+'</span><div><button data-page="-1" '+(state.page===1?"disabled":"")+'>Previous</button><button data-page="1" '+(state.page>=pages?"disabled":"")+'>Next</button></div></div>';
 }
 function detail(id){
  const r=state.data.items.find(x=>String(x.id)===id);if(!r)return;
  const s=sentiment(r), topic=topics[r.category]||"Other feedback";
  const stored=String(r.summary||"");
  const english=stored && !/[^\u0000-\u024f\s\p{P}]/u.test(stored);
- const text=s==="pending"?"Analysis is not available yet.":english?stored.split(/\s+/).slice(0,8).join(" "):(s==="positive"?"Positive feedback recorded.":s==="negative"?"Negative feedback about "+topic.toLowerCase()+".":"No clear positive or negative signal.");
+ const text=briefSummary(r);
  const action=s==="pending"?"Analyze this review":urgent(r)?"Escalate for management review":attention(r)?"Review internally and consider a response":s==="positive"?"No action needed":"Monitor";
  const url=safeURL(r.source_url);
- $("#detail").innerHTML='<button id="close-detail" class="icon-button close-detail" aria-label="Close review details">'+icon("close")+'</button><div class="detail-author">'+platform(r.source)+'<div><h2 id="detail-title">'+esc(r.author||"Anonymous")+'</h2><p>'+esc(names[r.source]||r.source)+' · '+fmt(r.published_at)+'</p></div></div>'+badge(r)+'<blockquote>'+esc(r.review_text)+'</blockquote><div class="detail-section"><h3>AI Summary</h3><p>'+esc(text)+'</p></div><div class="detail-section"><h3>Main Topic</h3><p>'+esc(s==="pending"?"Awaiting analysis":topic)+'</p></div><div class="detail-section"><h3>Recommended Action</h3><p>'+esc(action)+'</p></div>'+(!english&&s!=="pending"?'<p class="muted">English overview based on saved classification. Original analysis remains unchanged.</p>':"")+'<dl><dt>Source</dt><dd>'+esc(names[r.source]||r.source)+'</dd><dt>Date</dt><dd>'+fmt(r.published_at)+'</dd></dl>'+(url?'<a class="source-link" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">Open source reference '+icon("arrow")+'</a>':'<p class="muted">Original URL unavailable</p>')+'<div class="business-status '+(attention(r)?"negative":s)+'"><strong>'+(s==="pending"?"Awaiting analysis":urgent(r)?"Urgent":attention(r)?"Needs attention":s==="positive"?"Positive feedback":"Worth monitoring")+'</strong><p>'+esc(action)+'.</p></div>';
+ const confidenceValue=r.confidence===null||r.confidence===""?NaN:Number(r.confidence);
+ const confidence=Number.isFinite(confidenceValue)?Math.max(0,Math.min(100,confidenceValue))+"%":"Not recorded";
+ const risk=s==="pending"?"Not available":Math.max(0,Math.min(100,Number(r.risk_score)||0))+" / 100";
+ const confidenceGlow=Number.isFinite(confidenceValue)?'<section class="confidence-glow" style="--confidence:'+Math.max(0,Math.min(100,confidenceValue))+'%"><span>AI confidence</span><strong>'+esc(confidence)+'</strong><div><i></i></div></section>':'';
+ $("#detail").innerHTML='<button id="close-detail" class="icon-button close-detail" aria-label="Close review details">'+icon("close")+'</button><div class="detail-author">'+platform(r.source)+'<div><h2 id="detail-title">'+esc(r.author||"Anonymous")+'</h2><p>'+esc(names[r.source]||r.source)+' · '+fmt(r.published_at)+'</p></div></div>'+badge(r)+'<blockquote>'+esc(r.review_text)+'</blockquote><div class="detail-section"><h3>AI Summary</h3><p>'+esc(text)+'</p></div><div class="detail-section"><h3>Main Topic</h3><p>'+esc(s==="pending"?"Awaiting analysis":topic)+'</p></div><div class="detail-section"><h3>Recommended Action</h3><p>'+esc(action)+'</p></div>'+confidenceGlow+(!english&&s!=="pending"?'<p class="muted">English overview based on saved classification. Original analysis remains unchanged.</p>':"")+'<dl><dt>Risk index</dt><dd>'+esc(risk)+'</dd><dt>Source</dt><dd>'+esc(names[r.source]||r.source)+'</dd><dt>Date</dt><dd>'+fmt(r.published_at)+'</dd></dl>'+(url?'<a class="source-link" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">Open source reference '+icon("arrow")+'</a>':'<p class="muted">Original URL unavailable</p>')+'<div class="business-status '+(attention(r)?"negative":s)+'"><strong>'+(s==="pending"?"Awaiting analysis":urgent(r)?"Urgent":attention(r)?"Needs attention":s==="positive"?"Positive feedback":"Worth monitoring")+'</strong><p>'+esc(action)+'.</p></div>';
  $("#detail").showModal();$("#close-detail").onclick=()=>$("#detail").close();
 }
 function volumeChart(){return bars((state.data.volume||[]).map(x=>({issue:x.month,reviews:x.reviews})));}
@@ -114,10 +148,10 @@ function insights(){
    positive.length?group("Positive highlights",positive,"Maintain the strengths clients value."):"",
    card("What to watch",'<p>'+esc(mainIssue?mainIssue.reviews+' negative reviews mention '+mainIssue.issue.toLowerCase()+'.':"No negative feedback was detected in this period.")+'</p><p>Compare periods in Analytics before concluding a trend is increasing.</p><button data-go="analytics">View analytics</button>')
  ].join("");
- return head("AI Insights","Clear management signals from saved review analysis.")+'<section class="executive-insight"><p class="eyebrow">MANAGEMENT INSIGHT</p><h2>'+esc(assessment)+'</h2><p>Generated from stored AI classifications and original reviews. It does not re-run AI.</p></section><section class="insight-summary"><article><span class="insight-label good">WHAT IS GOING WELL</span><p>'+esc(good)+'</p></article><article><span class="insight-label bad">WHAT NEEDS ATTENTION</span><p>'+esc(bad)+'</p></article><article><span class="insight-label focus">MANAGEMENT FOCUS</span><p>'+esc(focus)+'</p></article></section><section class="analysis-coverage"><strong>'+state.data.metrics.analyzed+' of '+state.data.metrics.total+' reviews analyzed</strong><span>'+ (pending ? pending+' review'+(pending===1?'':'s')+' waiting for AI analysis.' : 'Everything in this period has already been analyzed.') +'</span></section><button class="primary" id="analyze" '+(!pending?'disabled':'')+'>Analyze '+(pending?'pending reviews':'up to date')+'</button><p class="muted">Processes up to 50 pending or failed reviews. Completed analysis is never repeated.</p><div class="grid two">'+groups+'</div>';
+ return head("AI Insights","Clear management signals from saved review analysis.")+'<section class="executive-insight"><p class="eyebrow">MANAGEMENT INSIGHT</p><h2>'+esc(assessment)+'</h2><p>Generated from stored AI classifications and original reviews. It does not re-run AI.</p></section><section class="insight-summary"><article><span class="insight-label good">WHAT IS GOING WELL</span><p>'+esc(good)+'</p></article><article><span class="insight-label bad">WHAT NEEDS ATTENTION</span><p>'+esc(bad)+'</p></article><article><span class="insight-label focus">MANAGEMENT FOCUS</span><p>'+esc(focus)+'</p></article></section><section class="analysis-coverage"><strong>'+state.data.metrics.analyzed+' of '+state.data.metrics.total+' reviews analyzed</strong><span>'+ (pending ? pending+' review'+(pending===1?'':'s')+' waiting for AI analysis.' : 'Everything in this period has already been analyzed.') +'</span></section><button class="primary" id="analyze" '+(!pending?'disabled':'')+'>Analyze '+(pending?'pending reviews':'up to date')+'</button><p class="muted">New reviews receive confidence automatically. Existing saved reviews are enriched automatically after server startup.</p><div class="grid two">'+groups+'</div>';
 }
 function sources(){
- return head("Sources","Your feedback channels. Import authorized exports; no automatic platform connection is implied.")+'<div class="grid three">'+state.data.sources.map(s=>card(platform(s.name)+' '+esc(names[s.name]||s.name),'<span class="badge pending">Manual Import</span><p><strong class="large">'+s.count+'</strong> reviews this period</p><p class="muted">'+s.total+' all time · Last stored: '+fmt(s.latest)+'</p><button data-source="'+esc(s.name)+'">View reviews</button>')).join("")+'</div>'+card("Import feedback",'<p>Import only feedback you are authorized to use. Confirm it belongs to GRATA, not a post caption. Existing reviews are kept unchanged.</p><form id="import-form"><label>CSV file (UTF-8, up to 1,000 rows / 2 MB)<input id="csv-file" type="file" accept=".csv,text/csv" required></label><details><summary>CSV format</summary><p>Required: source, review_text. Optional: author, published_at (ISO date), rating (0–5; 0 means unavailable), external_id, source_url. Missing dates remain unknown.</p><button type="button" id="template">Download column template</button></details><label class="check"><input type="checkbox" id="after-analysis" '+(state.data.config.ai?"checked":"disabled")+'> Analyze pending reviews after import (up to 50)</label><button class="primary" type="submit">Import reviews</button></form><p id="import-result" role="status"></p><p class="muted">Refresh reloads saved database records. Scheduled collection and official platform authorization are not configured.</p>');
+ return head("Sources","Your feedback channels. Import authorized exports or collect public LinkedIn comments through Apify.")+'<div class="grid three">'+state.data.sources.map(s=>{const last=s.total===0?"No data collected yet":s.latest?fmt(s.latest):"Date not provided by source";return card(platform(s.name)+' '+esc(names[s.name]||s.name),'<span class="badge pending">Stored feedback</span><p><strong class="large">'+s.count+'</strong> reviews this period</p><p class="muted">'+s.total+' all time · Last stored: '+esc(last)+'</p><button data-source="'+esc(s.name)+'">View reviews</button>')}).join("")+'</div>'+card("LinkedIn comments",'<p>Collect public comments from GRATA\'s company posts. Existing comments are safely skipped as duplicates.</p><form id="linkedin-form"><label>LinkedIn company page<input id="linkedin-url" type="url" value="https://www.linkedin.com/company/grata/" required></label><label>Latest posts to check<select id="linkedin-limit"><option value="20">20 posts</option><option value="50">50 posts</option><option value="70">70 posts</option></select></label><button class="primary" type="submit">Collect LinkedIn comments</button></form><p class="muted">Public LinkedIn pages expose a limited recent window. Brand mentions elsewhere on LinkedIn require a separate licensed monitoring provider.</p>')+card("Import feedback",'<p>Import only feedback you are authorized to use. Confirm it belongs to GRATA, not a post caption. Existing reviews are kept unchanged.</p><form id="import-form"><label>CSV file (UTF-8, up to 1,000 rows / 2 MB)<input id="csv-file" type="file" accept=".csv,text/csv" required></label><details><summary>CSV format</summary><p>Required: source, review_text. Optional: author, published_at (ISO date), rating (0–5; 0 means unavailable), external_id, source_url. Missing dates remain unknown.</p><button type="button" id="template">Download column template</button></details><label class="check"><input type="checkbox" id="after-analysis" '+(state.data.config.ai?"checked":"disabled")+'> Analyze pending reviews after import (up to 50)</label><button class="primary" type="submit">Import reviews</button></form><p id="import-result" role="status"></p>');
 }
 const reportTypes=["Executive Reputation Summary","Review Trends Report","Source Performance Report","Issue Summary","Monthly Reputation Report"];
 function reportBody(){
@@ -183,6 +217,7 @@ document.addEventListener("click",e=>{
  if(b.dataset.view)go(b.dataset.view);
  if(b.dataset.go)go(b.dataset.go);
  if(b.dataset.review)detail(b.dataset.review);
+ if(Object.prototype.hasOwnProperty.call(b.dataset,"reviewFilter")){state.sentiment=b.dataset.reviewFilter;state.page=1;render()}
  if(b.dataset.source){state.source=b.dataset.source;state.sentiment="";state.query="";state.page=1;go("reviews")}
  if(b.dataset.page){state.page+=Number(b.dataset.page);render()}
  if(b.id==="print")window.print();
@@ -197,6 +232,11 @@ document.addEventListener("change",e=>{
  if(e.target.id==="report-type"){state.report=e.target.value;render()}
 });
 document.addEventListener("submit",async e=>{
+ if(e.target.id==="linkedin-form"){
+  e.preventDefault();if(writing)return;writing=true;const button=e.target.querySelector('[type="submit"]');button.disabled=true;
+  try{toast("Collecting public LinkedIn comments…");const r=await api("/api/collect/linkedin",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company_url:$("#linkedin-url").value,limit:Number($("#linkedin-limit").value)})});await load();toast(r.saved+" LinkedIn comments saved; "+r.duplicates+" duplicates skipped.")}
+  catch(e){toast(e.message)}finally{writing=false;button.disabled=false}return;
+ }
  if(e.target.id!=="import-form")return;e.preventDefault();if(writing)return;
  const file=$("#csv-file").files[0];if(!file)return;if(file.size>2_000_000){toast("Choose a file smaller than 2 MB.");return}
  writing=true;const button=e.target.querySelector('[type="submit"]');button.disabled=true;const runAI=$("#after-analysis").checked;

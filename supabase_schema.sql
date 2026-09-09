@@ -2,7 +2,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.reviews (
   id uuid primary key default gen_random_uuid(),
-  source text not null check (source in ('Facebook', 'Instagram', '2GIS', 'Google', 'Yandex', 'CSV')),
+  source text not null check (source in ('Facebook', 'Instagram', 'LinkedIn', '2GIS', 'Google', 'Yandex', 'CSV')),
   author text not null default 'Anonymous',
   rating smallint not null default 0 check (rating between 0 and 5),
   review_text text not null,
@@ -14,6 +14,7 @@ create table if not exists public.reviews (
   category text check (category in ('response_time', 'staff_behavior', 'service_quality', 'product_quality', 'pricing', 'communication', 'waiting_time', 'other')),
   severity text check (severity in ('low', 'medium', 'high', 'critical')),
   risk_score smallint check (risk_score between 0 and 100),
+  confidence smallint check (confidence between 0 and 100),
   summary text,
   recommendation text,
   suggested_response text,
@@ -30,6 +31,9 @@ create unique index if not exists reviews_source_external_id_idx
 create index if not exists reviews_published_at_idx on public.reviews (published_at desc);
 create index if not exists reviews_risk_idx on public.reviews (risk_score desc) where sentiment = 'negative';
 create index if not exists reviews_analysis_status_idx on public.reviews (analysis_status);
+
+-- Safe upgrade for an existing MVP database.
+alter table public.reviews add column if not exists confidence smallint check (confidence between 0 and 100);
 
 alter table public.reviews enable row level security;
 -- This MVP is intended for a private management dashboard. Use a server-side service-role
